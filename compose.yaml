@@ -1,0 +1,42 @@
+services:
+  admin:
+    # Tool image, pinned and updated by Renovate. To try a locally built image, override
+    # it in an untracked compose.override.yaml (image: proxmox-admin:local).
+    image: ghcr.io/gciatto/proxmox-admin:1.0.0
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    env_file:
+      - path: cluster.env # shared, committed
+      - path: .env # personal, untracked
+        required: false
+    environment:
+      ADMIN_UID: "${ADMIN_UID:-1000}"
+      ADMIN_GID: "${ADMIN_GID:-1000}"
+      PROXMOX_TOKEN_SECRET_FILE: /run/secrets/proxmox-token
+      # AI CLIs: credentials as alternatives to a login stored in the mounted config dirs.
+      # Passed through only when set in the invoking shell.
+      ANTHROPIC_API_KEY:
+      CLAUDE_CODE_OAUTH_TOKEN:
+      OPENAI_API_KEY:
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace
+      - type: bind
+        source: ${HOST_SSH_DIR:?Set HOST_SSH_DIR via admin.sh or environment}
+        target: /home/operator/.ssh
+        read_only: true
+      - type: bind
+        source: ${HOST_PROXMOX_TOKEN_FILE:?Set HOST_PROXMOX_TOKEN_FILE via admin.sh or environment}
+        target: /run/secrets/proxmox-token
+        read_only: true
+      - type: bind
+        source: ./.local/cache
+        target: /home/operator/.cache
+      - type: bind
+        source: ${HOST_CLAUDE_DIR:?Set HOST_CLAUDE_DIR via admin.sh or environment}
+        target: /home/operator/.claude
+      - type: bind
+        source: ${HOST_CODEX_DIR:?Set HOST_CODEX_DIR via admin.sh or environment}
+        target: /home/operator/.codex

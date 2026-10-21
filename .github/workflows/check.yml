@@ -1,0 +1,36 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - 'renovate/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  validate:
+    name: Validate with the pinned admin image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Inventory, playbook syntax and OpenTofu formatting (no cluster access)
+        run: |
+          image=$(sed -n 's/^ *image: *//p' compose.yaml)
+          docker run --rm \
+            --env ADMIN_UID="$(id -u)" \
+            --env ADMIN_GID="$(id -g)" \
+            --env-file cluster.env \
+            --volume "$PWD:/workspace:ro" \
+            "$image" pve-validate

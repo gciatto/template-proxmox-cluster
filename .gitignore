@@ -1,0 +1,14 @@
+# Personal settings and local state
+.env
+.local/
+compose.override.yaml
+# OpenTofu
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+**/*.tfvars.json
+**/crash.log
+**/crash.*.log
+# Python
+__pycache__/
