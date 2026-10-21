@@ -51,4 +51,4 @@ Changes to the cluster go through pull requests to this repository whenever poss
 
 ## Upgrading the tools
 
-Renovate opens pull requests when a new admin image or OpenTofu provider version is published. Minor and patch upgrades are merged automatically once CI passes; majors wait for review. The next `./admin.sh` pulls the new image and uses its launcher. To try an unreleased image (and its launcher): `PVE_ADMIN_IMAGE=proxmox-admin:local ./admin.sh`. An untracked `compose.override.yaml` can still customize the container (extra mounts, environment).
+Renovate opens pull requests when a new admin image or OpenTofu provider version is published. Minor and patch upgrades are merged automatically once CI passes; majors wait for review. The next `./admin.sh` pulls the new image and uses its launcher. To try an unreleased image (and its launcher): `PVE_ADMIN_IMAGE=proxmox-admin:local ./admin.sh`, or set `PVE_ADMIN_IMAGE=proxmox-admin:local` in `.env` to keep using it (`init.sh` follows the same rule). An untracked `compose.override.yaml` can still customize the container (extra mounts, environment).

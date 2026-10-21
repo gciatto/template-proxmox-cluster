@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Interactive setup of this cluster repository. Safe to re-run: the answers of the last run
 # (kept in .local/init.env, even if it failed), else the current values, are the defaults.
-# Uses proxmox-admin:local when built on this workstation, else the image pinned in cluster.env.
+# Uses the same admin image as ./admin.sh: PVE_ADMIN_IMAGE from the environment, else from .env,
+# else the pin in cluster.env (e.g. PVE_ADMIN_IMAGE=proxmox-admin:local in .env for a local build).
 #
 #   ./init.sh               first run: describe the cluster, then set up this workstation
 #   ./init.sh cluster       (re)describe the cluster: cluster.env, inventory, CA bundle,
@@ -89,14 +90,9 @@ comment_env() { # FILE KEY
     rm -f "$tmp"
 }
 
-image() { # PVE_ADMIN_IMAGE from the environment, else a locally built image, else the pin
-    if [[ -n "${PVE_ADMIN_IMAGE:-}" ]]; then
-        printf '%s' "$PVE_ADMIN_IMAGE"
-    elif docker image inspect proxmox-admin:local >/dev/null 2>&1; then
-        printf proxmox-admin:local
-    else
-        get_env cluster.env PVE_ADMIN_IMAGE
-    fi
+image() { # the same rule as ./admin.sh: PVE_ADMIN_IMAGE from the environment, else .env, else the pin
+    local image=${PVE_ADMIN_IMAGE:-$(get_env .env PVE_ADMIN_IMAGE)}
+    printf '%s' "${image:-$(get_env cluster.env PVE_ADMIN_IMAGE)}"
 }
 
 jqi() { # jq from the admin image (pulled at startup), so that the workstation needs no jq
@@ -283,6 +279,41 @@ cluster_phase() {
     note 'this repository read access to the GHCR package, so that CI can pull it.'
 }
 
+has_audit() { # reads `pveum ... permissions --path /` JSON: is Sys.Audit granted on /?
+    jqi -e '.["/"]["Sys.Audit"] != null' >/dev/null 2>&1
+}
+
+check_privileges() { # SSH_USER HOST USER TOKEN_NAME: px needs Sys.Audit on /; offers to grant a role
+    local ssh_user=$1 host=$2 user=$3 token_name=$4 privsep user_ok=1 token_ok=1 role args=()
+    say "Privileges of $user!$token_name"
+    privsep=$(remote "$ssh_user" "$host" pveum user token list "'$user'" --output-format json 2>/dev/null \
+        | jqi -r --arg t "$token_name" '.[] | select(.tokenid == $t) | .privsep') || true
+    if [[ -z "$privsep" ]]; then
+        note 'Cannot read the token over SSH (no root/sudo?): privileges not checked.'
+        return
+    fi
+    remote "$ssh_user" "$host" pveum user permissions "'$user'" --path / --output-format json | has_audit || user_ok=0
+    if [[ "$privsep" == 1 ]]; then
+        remote "$ssh_user" "$host" pveum user token permissions "'$user'" "'$token_name'" --path / --output-format json \
+            | has_audit || token_ok=0
+    fi
+    if [[ $user_ok == 1 && $token_ok == 1 ]]; then
+        note 'OK   Sys.Audit on / (enough for px; Ansible and OpenTofu changes need more).'
+        return
+    fi
+    note 'No Sys.Audit on / for this token: px will get 403 errors.'
+    [[ $user_ok == 1 ]] || args+=(--users "'$user'")
+    [[ $token_ok == 1 ]] || args+=(--tokens "'$user!$token_name'")
+    role=$(ask '  Role to grant on / (PVEAuditor: read-only; Administrator: also changes)' PVEAuditor \
+        '^[A-Za-z]+$' GRANT_ROLE)
+    if confirm "  Grant $role on / to ${args[*]}" y \
+        && remote "$ssh_user" "$host" pveum acl modify / "${args[@]}" --roles "$role"; then
+        note "Granted $role on /."
+    else
+        note "Not granted. On a node: pveum acl modify / ${args[*]} --roles $role"
+    fi
+}
+
 workstation_phase() {
     local cluster_name
     cluster_name=$(get_env cluster.env CLUSTER_NAME)
@@ -336,7 +367,6 @@ workstation_phase() {
                 local privsep=0 output
                 if confirm "Privilege-separated token (needs its own ACLs; otherwise it has $user's permissions)" n; then
                     privsep=1
-                    note "Grant it roles afterwards, e.g.: pveum acl modify / --tokens '$token_id' --roles PVEAuditor"
                 fi
                 if output=$(remote "$ssh_user" "$host" pveum user token add "$user" "$token_name" --privsep "$privsep" \
                     --comment "'proxmox-admin $(hostname -s 2>/dev/null || echo workstation)'" --output-format json); then
@@ -363,6 +393,8 @@ workstation_phase() {
         [[ -n "$secret" ]] && note "Token secret saved to $token_file (mode 600, outside the repository)."
     fi
 
+    [[ -n "$secret" ]] && check_privileges "$ssh_user" "$host" "$user" "$token_name"
+
     if command -v python3 >/dev/null 2>&1 && confirm 'Install the Git hooks (commit message checks, pve-validate)' y; then
         python3 scripts/githooks.py install >&2 || true
     fi
@@ -380,7 +412,11 @@ docker info >/dev/null 2>&1 || die 'Docker is not running: start it (Docker Desk
 PVE_ADMIN_IMAGE=$(image)
 [[ -n "$PVE_ADMIN_IMAGE" ]] || die 'PVE_ADMIN_IMAGE is missing from cluster.env.'
 export PVE_ADMIN_IMAGE # ./admin.sh below uses the same image
-[[ "$PVE_ADMIN_IMAGE" == "$(get_env cluster.env PVE_ADMIN_IMAGE)" ]] || say "Using the admin image $PVE_ADMIN_IMAGE"
+if [[ "$PVE_ADMIN_IMAGE" != "$(get_env cluster.env PVE_ADMIN_IMAGE)" ]]; then
+    say "Using the admin image $PVE_ADMIN_IMAGE, not the pin in cluster.env"
+elif docker image inspect proxmox-admin:local >/dev/null 2>&1; then
+    note 'A local build proxmox-admin:local exists: set PVE_ADMIN_IMAGE=proxmox-admin:local in .env to use it.'
+fi
 if ! docker image inspect "$(image)" >/dev/null 2>&1; then
     say "Pulling the admin image $(image) (once; over 1 GB)..."
     docker pull "$(image)" >&2 || die "Cannot pull $(image): check the network, or docker login ghcr.io if private."
