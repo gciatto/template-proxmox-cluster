@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Interactive setup of this cluster repository. Safe to re-run: current values are defaults.
+# Interactive setup of this cluster repository. Safe to re-run: the answers of the last run
+# (kept in .local/init.env, even if it failed), else the current values, are the defaults.
+# Uses proxmox-admin:local when built on this workstation, else the image pinned in cluster.env.
 #
 #   ./init.sh               first run: describe the cluster, then set up this workstation
 #   ./init.sh cluster       (re)describe the cluster: cluster.env, inventory, CA bundle,
@@ -15,7 +17,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 PLACEHOLDER_CLUSTER=example
 NAME_RE='^[A-Za-z0-9._-]+$'
-USER_RE='^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$'
+# The name may itself contain @ (e.g. LDAP/AD users: alice@example.org@example.org).
+USER_RE='^[A-Za-z0-9._@-]+@[A-Za-z0-9._-]+$'
 TOKEN_RE='^[A-Za-z][A-Za-z0-9._-]*$'
 # SSH on the workstation uses the directory mounted into the container (HOST_SSH_DIR): its
 # config, known_hosts and keys, so that both see the same nodes.
@@ -28,17 +31,27 @@ if [[ "$SSH_DIR" != "$HOME/.ssh" ]]; then
     done
 fi
 INIT_SSH_USER=''
+# Answers of previous runs, finished or not: defaults for the next run. Never holds secrets.
+ANSWERS=.local/init.env
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*" >&2; }
 note() { printf '  %s\n' "$*" >&2; }
 die() { printf 'init.sh: %s\n' "$*" >&2; exit 1; }
 
-ask() { # PROMPT [DEFAULT] [REGEX]: prints the answer
-    local answer
+ask() { # PROMPT [DEFAULT] [REGEX] [KEY]: prints the answer; KEY recalls and records it in ANSWERS
+    local answer default=${2:-}
+    if [[ -n "${4:-}" ]]; then
+        answer=$(get_env "$ANSWERS" "$4")
+        default=${answer:-$default}
+    fi
     while true; do
-        read -r -p "$1${2:+ [$2]}: " answer
-        answer=${answer:-${2:-}}
+        read -r -p "$1${default:+ [$default]}: " answer
+        answer=${answer:-$default}
         if [[ -z "${3:-}" || "$answer" =~ $3 ]]; then
+            if [[ -n "${4:-}" ]]; then
+                mkdir -p "$(dirname "$ANSWERS")" && touch "$ANSWERS"
+                set_env "$ANSWERS" "$4" "$answer"
+            fi
             printf '%s' "$answer"
             return
         fi
@@ -76,8 +89,14 @@ comment_env() { # FILE KEY
     rm -f "$tmp"
 }
 
-image() {
-    get_env cluster.env PVE_ADMIN_IMAGE
+image() { # PVE_ADMIN_IMAGE from the environment, else a locally built image, else the pin
+    if [[ -n "${PVE_ADMIN_IMAGE:-}" ]]; then
+        printf '%s' "$PVE_ADMIN_IMAGE"
+    elif docker image inspect proxmox-admin:local >/dev/null 2>&1; then
+        printf proxmox-admin:local
+    else
+        get_env cluster.env PVE_ADMIN_IMAGE
+    fi
 }
 
 jqi() { # jq from the admin image (pulled at startup), so that the workstation needs no jq
@@ -126,10 +145,10 @@ cluster_phase() {
     local host port ssh_user json='' cluster_name='' names=() addrs=()
     host=$(get_env cluster.env PROXMOX_HOST)
     [[ "$host" == *.example.org ]] && host=''
-    host=$(ask "Proxmox API endpoint: a node's hostname or IP (no https://, no port)" "$host" "$NAME_RE")
-    port=$(ask 'API port' "$(get_env cluster.env PROXMOX_PORT)" '^[0-9]+$')
+    host=$(ask "Proxmox API endpoint: a node's hostname or IP (no https://, no port)" "$host" "$NAME_RE" PROXMOX_HOST)
+    port=$(ask 'API port' "$(get_env cluster.env PROXMOX_PORT)" '^[0-9]+$' PROXMOX_PORT)
     ssh_user=$(ask 'Your SSH user on the nodes (root, or with passwordless sudo) to discover the cluster' \
-        "$(get_env .env PROXMOX_SSH_USER)" "$NAME_RE")
+        "$(get_env .env PROXMOX_SSH_USER)" "$NAME_RE" PROXMOX_SSH_USER)
     INIT_SSH_USER=$ssh_user # default for the workstation phase
 
     if trust_host "$host"; then
@@ -156,14 +175,14 @@ cluster_phase() {
     say 'Address Ansible and SSH use for each node (IP, or a resolvable name)'
     local i
     for i in "${!names[@]}"; do
-        addrs[i]=$(ask "  ${names[i]}" "${addrs[i]}" "$NAME_RE")
+        addrs[i]=$(ask "  ${names[i]}" "${addrs[i]}" "$NAME_RE" "ADDRESS_${names[i]//[^A-Za-z0-9_]/_}")
     done
 
     local current_name
     current_name=$(get_env cluster.env CLUSTER_NAME)
     [[ "$current_name" == "$PLACEHOLDER_CLUSTER" ]] && current_name=''
     cluster_name=$(ask 'Short name of this cluster (also names your token file)' \
-        "${current_name:-${cluster_name:-$(basename "$PWD")}}" "$NAME_RE")
+        "${current_name:-${cluster_name:-$(basename "$PWD")}}" "$NAME_RE" CLUSTER_NAME)
 
     say 'TLS'
     local validate=true bundle=''
@@ -225,11 +244,11 @@ cluster_phase() {
     if grep -q '<!-- Fill in' AGENTS.md || confirm 'Rewrite the cluster facts in AGENTS.md' n; then
         say 'Cluster facts for AI agents and new administrators (one line each; empty if unknown)'
         local purpose protected windows contacts conventions nodes_line='' block
-        purpose=$(ask '  What is the cluster for, and how critical is it')
-        protected=$(ask '  Guests or nodes never to stop, migrate or change without notice')
-        windows=$(ask '  Maintenance windows')
-        contacts=$(ask '  Contacts and escalation')
-        conventions=$(ask '  Conventions (VMID ranges, naming, storage and network usage)')
+        purpose=$(ask '  What is the cluster for, and how critical is it' '' '' FACT_PURPOSE)
+        protected=$(ask '  Guests or nodes never to stop, migrate or change without notice' '' '' FACT_PROTECTED)
+        windows=$(ask '  Maintenance windows' '' '' FACT_WINDOWS)
+        contacts=$(ask '  Contacts and escalation' '' '' FACT_CONTACTS)
+        conventions=$(ask '  Conventions (VMID ranges, naming, storage and network usage)' '' '' FACT_CONVENTIONS)
         for i in "${!names[@]}"; do
             nodes_line+="${nodes_line:+, }${names[i]} (${addrs[i]})"
         done
@@ -271,7 +290,7 @@ workstation_phase() {
     say "== Workstation setup for cluster $cluster_name (personal: .env, token file, known_hosts)"
 
     local ssh_user host
-    ssh_user=$(ask 'Your SSH user on the nodes' "${INIT_SSH_USER:-$(get_env .env PROXMOX_SSH_USER)}" "$NAME_RE")
+    ssh_user=$(ask 'Your SSH user on the nodes' "${INIT_SSH_USER:-$(get_env .env PROXMOX_SSH_USER)}" "$NAME_RE" PROXMOX_SSH_USER)
     host=$(get_env cluster.env PROXMOX_HOST)
 
     say 'SSH host keys and access'
@@ -290,10 +309,10 @@ workstation_phase() {
         | jqi -r '[.[] | "\(.realm) (\(.type))"] | join(", ")' 2>/dev/null) || true
     [[ -n "$realms" ]] && note "Realms of this cluster: $realms"
     local user token_name token_file token_id
-    user=$(ask 'Your Proxmox user, name@realm (e.g. alice@pve, root@pam)' "$(get_env .env PROXMOX_USER)" "$USER_RE")
+    user=$(ask 'Your Proxmox user, name@realm (e.g. alice@pve, root@pam)' "$(get_env .env PROXMOX_USER)" "$USER_RE" PROXMOX_USER)
     token_name=$(get_env .env PROXMOX_TOKEN_ID)
     token_name=${token_name#*!}
-    token_name=$(ask 'API token name' "${token_name:-admin-cli}" "$TOKEN_RE")
+    token_name=$(ask 'API token name' "${token_name:-admin-cli}" "$TOKEN_RE" PROXMOX_TOKEN_NAME)
     token_id="$user!$token_name"
     token_file=${HOST_PROXMOX_TOKEN_FILE:-$HOME/.config/proxmox-admin/$cluster_name/token}
 
@@ -357,8 +376,11 @@ workstation_phase() {
 }
 
 command -v docker >/dev/null 2>&1 || die 'Docker is required.'
-[[ -n "$(image)" ]] || die 'PVE_ADMIN_IMAGE is missing from cluster.env.'
 docker info >/dev/null 2>&1 || die 'Docker is not running: start it (Docker Desktop, Colima, ...) and retry.'
+PVE_ADMIN_IMAGE=$(image)
+[[ -n "$PVE_ADMIN_IMAGE" ]] || die 'PVE_ADMIN_IMAGE is missing from cluster.env.'
+export PVE_ADMIN_IMAGE # ./admin.sh below uses the same image
+[[ "$PVE_ADMIN_IMAGE" == "$(get_env cluster.env PVE_ADMIN_IMAGE)" ]] || say "Using the admin image $PVE_ADMIN_IMAGE"
 if ! docker image inspect "$(image)" >/dev/null 2>&1; then
     say "Pulling the admin image $(image) (once; over 1 GB)..."
     docker pull "$(image)" >&2 || die "Cannot pull $(image): check the network, or docker login ghcr.io if private."
