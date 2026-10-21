@@ -4,7 +4,7 @@ Rules for AI agents (Claude Code, Codex) helping the administrators of **this Pr
 
 ## Cluster facts
 
-<!-- Fill in when creating the cluster repository, and keep up to date. -->
+<!-- Fill in by running ./init.sh cluster, and keep up to date. -->
 
 - Purpose and criticality: _e.g. production for the X department; pve3 hosts the backups_.
 - Nodes and roles: _see `ansible/inventory/hosts.yml`_.
@@ -13,6 +13,7 @@ Rules for AI agents (Claude Code, Codex) helping the administrators of **this Pr
 
 ## Operating
 
+- **At the start of a session**, run `px snapshot` and read it: nodes, guests, storage, networks, realms, users, groups, ACLs, pools, HA, backup and replication jobs (cached in `/tmp/pve-snapshot/` for 15 minutes; `--refresh` after changes). Query details from `/tmp/pve-snapshot/snapshot.json` with `jq`, or any other API path with `px get PATH`. Sections listed as not collected need more token privileges: say so rather than guessing.
 - Inspect with read-only commands first: `px [--json] status|nodes|guests|storage|version`, `px doctor`, `pve-inventory`, `pve-ping`, `pve-play node-facts|cluster-status|guests`, `pve-tofu plan`.
 - **Ask before any change**: anything that starts, stops, migrates, creates, deletes or reconfigures guests, nodes, storage, users or the network; `pve-shell` / `ansible -m shell` commands that are not read-only; `pve-tofu apply`; playbook runs that change state (run them with `--check --diff` first and show the result). State what will change, on which hosts or guests, and how to undo it.
 - Prefer changes through a playbook under `ansible/playbooks/` or an OpenTofu resource under `tofu/` over ad-hoc commands, so they are reviewed, versioned and repeatable. Playbooks must be idempotent.
@@ -31,6 +32,7 @@ Rules for AI agents (Claude Code, Codex) helping the administrators of **this Pr
 | `ansible/ansible.cfg` (optional) | Overrides the image's Ansible configuration. |
 | `tofu/` | OpenTofu configuration (`bpg/proxmox`) and its remote backend. |
 | `config/certs/` | Trusted CA bundle of the cluster, if it uses a private CA. |
+| `init.sh` | Interactive setup: `cluster` (describe the cluster) and `workstation` (each administrator). |
 | `admin.sh` | Stub: extracts the launcher from the pinned image (`.local/launcher/`) and runs it. |
 
 ## Git
