@@ -80,8 +80,7 @@ image() {
     get_env cluster.env PVE_ADMIN_IMAGE
 }
 
-jqi() { # jq from the admin image, so that the workstation needs no jq
-    docker image inspect "$(image)" >/dev/null 2>&1 || docker pull -q "$(image)" >&2
+jqi() { # jq from the admin image (pulled at startup), so that the workstation needs no jq
     docker run --rm -i --entrypoint jq "$(image)" "$@"
 }
 
@@ -359,6 +358,11 @@ workstation_phase() {
 
 command -v docker >/dev/null 2>&1 || die 'Docker is required.'
 [[ -n "$(image)" ]] || die 'PVE_ADMIN_IMAGE is missing from cluster.env.'
+docker info >/dev/null 2>&1 || die 'Docker is not running: start it (Docker Desktop, Colima, ...) and retry.'
+if ! docker image inspect "$(image)" >/dev/null 2>&1; then
+    say "Pulling the admin image $(image) (once; over 1 GB)..."
+    docker pull "$(image)" >&2 || die "Cannot pull $(image): check the network, or docker login ghcr.io if private."
+fi
 case "${1:-}" in
     cluster) cluster_phase ;;
     workstation) workstation_phase ;;
