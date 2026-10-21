@@ -27,7 +27,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Inventory, playbook syntax and OpenTofu formatting (no cluster access)
         run: |
-          image=$(sed -n 's/^ *image: *//p' compose.yaml)
+          image=$(sed -n 's/^PVE_ADMIN_IMAGE=//p' cluster.env)
           docker run --rm \
             --env ADMIN_UID="$(id -u)" \
             --env ADMIN_GID="$(id -g)" \

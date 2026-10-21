@@ -24,14 +24,14 @@ Rules for AI agents (Claude Code, Codex) helping the administrators of **this Pr
 
 | Path | Content |
 | --- | --- |
-| `cluster.env` | Shared, non-secret settings (API endpoint, TLS, `CLUSTER_NAME`). |
+| `cluster.env` | Shared, non-secret settings: pinned admin image (`PVE_ADMIN_IMAGE`, updated by Renovate), API endpoint, TLS, `CLUSTER_NAME`. |
 | `.env` (untracked, from `.env.example`) | Personal settings: token ID, user, SSH user. |
 | `ansible/inventory/hosts.yml` | Cluster nodes. |
 | `ansible/playbooks/` | Cluster-specific playbooks; `pve-play NAME` also finds the image's built-in ones (`ping`, `node-facts`, `cluster-status`, `guests`). A same-named file here overrides a built-in. |
 | `ansible/ansible.cfg` (optional) | Overrides the image's Ansible configuration. |
 | `tofu/` | OpenTofu configuration (`bpg/proxmox`) and its remote backend. |
 | `config/certs/` | Trusted CA bundle of the cluster, if it uses a private CA. |
-| `compose.yaml` | Pinned admin image (updated by Renovate) and mounts. |
+| `admin.sh` | Stub: extracts the launcher from the pinned image (`.local/launcher/`) and runs it. |
 
 ## Git
 

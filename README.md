@@ -3,7 +3,7 @@
 Template for the configuration repository of **one Proxmox VE cluster**, shared by its administrators and operated through the [proxmox-admin](https://github.com/gciatto/proxmox-admin) container image (Ansible, OpenTofu, the `px` CLI, Claude Code and Codex).
 
 - **This repository** holds what the cluster's administrators share: API endpoint and TLS settings, inventory, playbooks, OpenTofu resources, CA bundle, and the rules for AI agents (`AGENTS.md`).
-- **The image** holds the tools. It is pinned in `compose.yaml` and upgraded through Renovate pull requests.
+- **The image** holds the tools and the launcher. It is pinned in `cluster.env` and upgraded through Renovate pull requests; `admin.sh` is a stub that extracts the launcher (`admin.sh` + `compose.yaml`) from the pinned image and runs it, so the launcher always matches the image.
 - **Secrets stay personal**, on each administrator's workstation: SSH keys, the API token secret, AI logins.
 
 ## 1. Create the cluster repository (once per cluster)
@@ -17,7 +17,7 @@ Template for the configuration repository of **one Proxmox VE cluster**, shared 
 
 ## 2. Set up a workstation (once per administrator)
 
-Requirements: Docker with Compose ≥ 2.24, SSH access to the nodes, and an individual Proxmox API token (not needed for SSH-only work).
+Requirements: Bash, Docker with Compose ≥ 2.24, SSH access to the nodes, and an individual Proxmox API token (not needed for SSH-only work).
 
 ```bash
 git clone <this repository> && cd <it>
@@ -47,4 +47,4 @@ Changes to the cluster go through pull requests to this repository whenever poss
 
 ## Upgrading the tools
 
-Renovate opens pull requests when a new admin image or OpenTofu provider version is published. Minor and patch upgrades are merged automatically once CI passes; majors wait for review. After merging, each administrator runs `./admin.sh --pull`. To try an unreleased image, put `services: {admin: {image: proxmox-admin:local}}` in an untracked `compose.override.yaml`.
+Renovate opens pull requests when a new admin image or OpenTofu provider version is published. Minor and patch upgrades are merged automatically once CI passes; majors wait for review. The next `./admin.sh` pulls the new image and uses its launcher. To try an unreleased image (and its launcher): `PVE_ADMIN_IMAGE=proxmox-admin:local ./admin.sh`. An untracked `compose.override.yaml` can still customize the container (extra mounts, environment).

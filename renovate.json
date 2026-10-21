@@ -27,5 +27,18 @@
   "prConcurrentLimit": 25,
   "prHourlyLimit": 0,
   "separateMajorMinor": true,
-  "separateMinorPatch": true
+  "separateMinorPatch": true,
+  "customManagers": [
+    {
+      "description": "Admin image pinned in cluster.env",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)cluster\\.env$/"
+      ],
+      "matchStrings": [
+        "PVE_ADMIN_IMAGE=(?<depName>[^:\\s]+):(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
 }
